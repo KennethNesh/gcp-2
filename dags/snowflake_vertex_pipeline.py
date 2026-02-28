@@ -18,7 +18,7 @@ Prerequisites
 - Airflow Variables:
     SNOWFLAKE_DATABASE       – Snowflake database name (e.g. MY_DB)
     SNOWFLAKE_SCHEMA         – Snowflake schema name  (e.g. MY_SCHEMA)
-    SNOWFLAKE_TABLE          – table name              (e.g. ERROR_LOGS)
+    SNOWFLAKE_TABLE          – table name              (e.g. test)
     SNOWFLAKE_TIMESTAMP_COL  – column used for incremental extraction
                                (default: CREATED_AT)
     GCP_PROJECT_ID           – your GCP project ID
@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import traceback
 from datetime import datetime, timedelta, timezone
 
 from airflow import DAG
@@ -43,20 +44,48 @@ from vertexai.generative_models import GenerativeModel
 # Configuration (pulled from Airflow Variables at parse time)
 # ---------------------------------------------------------------------------
 SNOWFLAKE_CONN_ID = "snowflake_default"
-SNOWFLAKE_DATABASE = Variable.get("SNOWFLAKE_DATABASE", default_var="MY_DB")
-SNOWFLAKE_SCHEMA = Variable.get("SNOWFLAKE_SCHEMA", default_var="MY_SCHEMA")
-SNOWFLAKE_TABLE = Variable.get("SNOWFLAKE_TABLE", default_var="ERROR_LOGS")
-TIMESTAMP_COL = Variable.get("SNOWFLAKE_TIMESTAMP_COL", default_var="CREATED_AT")
-GCP_PROJECT_ID = Variable.get("GCP_PROJECT_ID", default_var="my-gcp-project")
-GCP_REGION = Variable.get("GCP_REGION", default_var="us-central1")
+
+log = logging.getLogger(__name__)
+
+# Load each variable individually with detailed logging so you can tell
+# at DAG-parse time exactly which values are being used and which fell
+# back to defaults.
+
+
+def _load_variable(key: str, default: str) -> str:
+    """Load an Airflow Variable and log whether we got a real value or the default."""
+    try:
+        value = Variable.get(key)
+        log.info(
+            "[CONFIG] Airflow Variable '%s' = '%s' (loaded from Variables store)",
+            key,
+            value,
+        )
+        return value
+    except KeyError:
+        log.warning(
+            "[CONFIG] Airflow Variable '%s' NOT FOUND — falling back to default: '%s'. "
+            "Set this variable in Admin → Variables if the default is wrong.",
+            key,
+            default,
+        )
+        return default
+
+
+SNOWFLAKE_DATABASE = _load_variable("SNOWFLAKE_DATABASE", "MY_DB")
+SNOWFLAKE_SCHEMA = _load_variable("SNOWFLAKE_SCHEMA", "MY_SCHEMA")
+SNOWFLAKE_TABLE = _load_variable("SNOWFLAKE_TABLE", "ERROR_LOGS")
+TIMESTAMP_COL = _load_variable("SNOWFLAKE_TIMESTAMP_COL", "CREATED_AT")
+GCP_PROJECT_ID = _load_variable("GCP_PROJECT_ID", "my-gcp-project")
+GCP_REGION = _load_variable("GCP_REGION", "us-central1")
 
 # Fully-qualified table reference: DATABASE.SCHEMA.TABLE
 FQ_TABLE = f"{SNOWFLAKE_DATABASE}.{SNOWFLAKE_SCHEMA}.{SNOWFLAKE_TABLE}"
+log.info("[CONFIG] Fully-qualified table target: %s", FQ_TABLE)
 
 # Airflow Variable that persists the high-water-mark between runs.
 HWM_VARIABLE_KEY = "snowflake_pipeline_hwm"
 
-log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Default DAG arguments
@@ -77,8 +106,16 @@ default_args = {
 def _get_last_hwm() -> str:
     """Return the stored high-water-mark, or epoch if first run."""
     try:
-        return Variable.get(HWM_VARIABLE_KEY)
+        hwm = Variable.get(HWM_VARIABLE_KEY)
+        log.info("[HWM] Loaded existing high-water-mark: %s", hwm)
+        return hwm
     except KeyError:
+        log.warning(
+            "[HWM] No high-water-mark variable '%s' found — "
+            "this appears to be the FIRST RUN. "
+            "Defaulting to epoch (1970-01-01T00:00:00Z) to fetch all rows.",
+            HWM_VARIABLE_KEY,
+        )
         return "1970-01-01T00:00:00Z"
 
 
@@ -87,45 +124,115 @@ def extract_new_entries(**context) -> None:
     Task 1 – Query Snowflake for rows where TIMESTAMP_COL > last HWM.
     Pushes the result set and the new HWM to XCom.
     """
-    hwm = _get_last_hwm()
-    log.info("High-water-mark from last run: %s", hwm)
+    log.info("=" * 70)
+    log.info("[EXTRACT] ▶ Starting extract_new_entries task")
+    log.info("=" * 70)
 
+    # -- 1. Get high-water-mark -------------------------------------------
+    hwm = _get_last_hwm()
+
+    # -- 2. Log the query we're about to run ------------------------------
     query = f"""
         SELECT *
         FROM   {FQ_TABLE}
         WHERE  {TIMESTAMP_COL} > %(hwm)s
         ORDER  BY {TIMESTAMP_COL} ASC
     """
+    log.info("[EXTRACT] Target table         : %s", FQ_TABLE)
+    log.info("[EXTRACT] Timestamp column      : %s", TIMESTAMP_COL)
+    log.info("[EXTRACT] High-water-mark (HWM) : %s", hwm)
+    log.info("[EXTRACT] SQL query:\n%s", query.strip())
+    log.info("[EXTRACT] Query parameter       : hwm = '%s'", hwm)
 
+    # -- 3. Connect to Snowflake ------------------------------------------
+    log.info("[EXTRACT] Creating SnowflakeHook with conn_id='%s'", SNOWFLAKE_CONN_ID)
+    log.info(
+        "[EXTRACT] Hook overrides → database='%s', schema='%s'",
+        SNOWFLAKE_DATABASE,
+        SNOWFLAKE_SCHEMA,
+    )
     hook = SnowflakeHook(
         snowflake_conn_id=SNOWFLAKE_CONN_ID,
         database=SNOWFLAKE_DATABASE,
         schema=SNOWFLAKE_SCHEMA,
     )
-    conn = hook.get_conn()
+
+    log.info("[EXTRACT] Establishing Snowflake connection …")
+    try:
+        conn = hook.get_conn()
+        log.info("[EXTRACT] ✅ Snowflake connection established successfully.")
+    except Exception as exc:
+        log.error("[EXTRACT] ❌ FAILED to connect to Snowflake!")
+        log.error("[EXTRACT] Connection ID: '%s'", SNOWFLAKE_CONN_ID)
+        log.error("[EXTRACT] Database: '%s', Schema: '%s'", SNOWFLAKE_DATABASE, SNOWFLAKE_SCHEMA)
+        log.error("[EXTRACT] Error type: %s", type(exc).__name__)
+        log.error("[EXTRACT] Error details: %s", exc)
+        log.error("[EXTRACT] Traceback:\n%s", traceback.format_exc())
+        log.error(
+            "[EXTRACT] 💡 TIP: Check that the Airflow connection 'snowflake_default' "
+            "is configured correctly in Admin → Connections. Verify account, user, "
+            "password, warehouse, database, schema, and role."
+        )
+        raise
+
     cursor = conn.cursor()
 
+    # -- 4. Execute the query ---------------------------------------------
     try:
+        log.info("[EXTRACT] Executing query against Snowflake …")
         cursor.execute(query, {"hwm": hwm})
         columns = [desc[0] for desc in cursor.description]
+        log.info("[EXTRACT] Result columns: %s", columns)
+
         rows = cursor.fetchall()
+        log.info("[EXTRACT] ✅ Query returned %d row(s).", len(rows))
+    except Exception as exc:
+        log.error("[EXTRACT] ❌ FAILED to execute Snowflake query!")
+        log.error("[EXTRACT] Query was:\n%s", query.strip())
+        log.error("[EXTRACT] Error type: %s", type(exc).__name__)
+        log.error("[EXTRACT] Error details: %s", exc)
+        log.error("[EXTRACT] Traceback:\n%s", traceback.format_exc())
+        log.error(
+            "[EXTRACT] 💡 TIP: Common causes:\n"
+            "  - Table '%s' does not exist (check SNOWFLAKE_TABLE variable)\n"
+            "  - Column '%s' does not exist (check SNOWFLAKE_TIMESTAMP_COL variable)\n"
+            "  - The role/user does not have SELECT permission on this table\n"
+            "  - Database or schema name is incorrect",
+            FQ_TABLE,
+            TIMESTAMP_COL,
+        )
+        raise
     finally:
+        log.info("[EXTRACT] Closing cursor and connection.")
         cursor.close()
         conn.close()
 
+    # -- 5. Process results -----------------------------------------------
     records = [dict(zip(columns, row)) for row in rows]
-    log.info("Fetched %d new record(s) from Snowflake.", len(records))
+    log.info("[EXTRACT] Fetched %d new record(s) from Snowflake.", len(records))
 
-    # Determine new HWM (max timestamp in this batch, or keep old one).
+    if records:
+        # Log a preview of the first few records (up to 3)
+        preview_count = min(3, len(records))
+        for i, rec in enumerate(records[:preview_count]):
+            log.info("[EXTRACT] Record %d/%d preview: %s", i + 1, len(records), rec)
+        if len(records) > preview_count:
+            log.info("[EXTRACT] … and %d more record(s).", len(records) - preview_count)
+
+    # -- 6. Determine new HWM ---------------------------------------------
     if records:
         new_hwm = max(str(r[TIMESTAMP_COL]) for r in records)
+        log.info("[EXTRACT] New HWM determined from batch: %s", new_hwm)
     else:
         new_hwm = hwm
+        log.info("[EXTRACT] No new records — HWM stays at: %s", new_hwm)
 
-    # Push data downstream via XCom.
+    # -- 7. Push data downstream via XCom ---------------------------------
+    log.info("[EXTRACT] Pushing %d record(s) and HWM='%s' to XCom.", len(records), new_hwm)
     context["ti"].xcom_push(key="new_records", value=json.dumps(records, default=str))
     context["ti"].xcom_push(key="new_hwm", value=new_hwm)
     context["ti"].xcom_push(key="record_count", value=len(records))
+    log.info("[EXTRACT] ✅ extract_new_entries task completed successfully.")
 
 
 def call_vertex_ai_agent(**context) -> None:
@@ -133,19 +240,57 @@ def call_vertex_ai_agent(**context) -> None:
     Task 2 – Send extracted entries to a Vertex AI (Gemini) agent
     that replies with "Hi".
     """
+    log.info("=" * 70)
+    log.info("[VERTEX-AI] ▶ Starting call_vertex_ai_agent task")
+    log.info("=" * 70)
+
     ti = context["ti"]
+
+    # -- 1. Pull records from XCom ----------------------------------------
+    log.info("[VERTEX-AI] Pulling records from XCom (task: extract_new_entries) …")
     records_json = ti.xcom_pull(task_ids="extract_new_entries", key="new_records")
-    records = json.loads(records_json) if records_json else []
+
+    if records_json is None:
+        log.warning(
+            "[VERTEX-AI] ⚠ xcom_pull returned None — this usually means the "
+            "upstream task 'extract_new_entries' did not push 'new_records'. "
+            "Check if that task completed successfully."
+        )
+        records = []
+    else:
+        records = json.loads(records_json)
+        log.info("[VERTEX-AI] Received %d record(s) from XCom.", len(records))
 
     if not records:
-        log.info("No new entries — skipping Vertex AI call.")
+        log.info("[VERTEX-AI] No new entries — skipping Vertex AI call.")
         ti.xcom_push(key="agent_response", value="No new entries to process.")
+        log.info("[VERTEX-AI] ✅ Task finished (no-op: zero records).")
         return
 
-    # Initialise Vertex AI SDK
-    aiplatform.init(project=GCP_PROJECT_ID, location=GCP_REGION)
+    # -- 2. Initialise Vertex AI SDK --------------------------------------
+    log.info(
+        "[VERTEX-AI] Initialising Vertex AI SDK — project='%s', location='%s'",
+        GCP_PROJECT_ID,
+        GCP_REGION,
+    )
+    try:
+        aiplatform.init(project=GCP_PROJECT_ID, location=GCP_REGION)
+        log.info("[VERTEX-AI] ✅ Vertex AI SDK initialised.")
+    except Exception as exc:
+        log.error("[VERTEX-AI] ❌ FAILED to initialise Vertex AI SDK!")
+        log.error("[VERTEX-AI] Error type: %s", type(exc).__name__)
+        log.error("[VERTEX-AI] Error details: %s", exc)
+        log.error("[VERTEX-AI] Traceback:\n%s", traceback.format_exc())
+        log.error(
+            "[VERTEX-AI] 💡 TIP: Verify GCP_PROJECT_ID and GCP_REGION Airflow "
+            "Variables are correct, and that Vertex AI API is enabled."
+        )
+        raise
 
-    model = GenerativeModel("gemini-1.5-flash-002")
+    # -- 3. Prepare prompt ------------------------------------------------
+    model_name = "gemini-1.5-flash-002"
+    log.info("[VERTEX-AI] Loading model: %s", model_name)
+    model = GenerativeModel(model_name)
 
     prompt = (
         "You are a data-processing agent. You will receive a batch of new "
@@ -153,18 +298,37 @@ def call_vertex_ai_agent(**context) -> None:
         'with "Hi".  Here are the entries:\n\n'
         f"{json.dumps(records, indent=2, default=str)}"
     )
+    log.info("[VERTEX-AI] Prompt length: %d characters", len(prompt))
+    log.info(
+        "[VERTEX-AI] Sending %d record(s) to Vertex AI (%s) …",
+        len(records),
+        model_name,
+    )
 
-    log.info("Sending %d record(s) to Vertex AI agent …", len(records))
-
+    # -- 4. Call the model ------------------------------------------------
     try:
         response = model.generate_content(prompt)
         agent_reply = response.text
-    except Exception:
-        log.exception("Vertex AI call failed — using fallback response.")
+        log.info("[VERTEX-AI] ✅ Received response from Vertex AI.")
+        log.info("[VERTEX-AI] Agent response (first 500 chars): %s", agent_reply[:500])
+    except Exception as exc:
+        log.error("[VERTEX-AI] ❌ Vertex AI call FAILED!")
+        log.error("[VERTEX-AI] Model: %s", model_name)
+        log.error("[VERTEX-AI] Error type: %s", type(exc).__name__)
+        log.error("[VERTEX-AI] Error details: %s", exc)
+        log.error("[VERTEX-AI] Traceback:\n%s", traceback.format_exc())
+        log.error(
+            "[VERTEX-AI] 💡 TIP: Common causes:\n"
+            "  - Vertex AI API not enabled (run setup_vertex_ai.sh)\n"
+            "  - Service account missing 'aiplatform.user' IAM role\n"
+            "  - Invalid GCP_PROJECT_ID or GCP_REGION\n"
+            "  - Quota exceeded"
+        )
         agent_reply = "Hi (fallback — agent unreachable)"
+        log.warning("[VERTEX-AI] Using fallback response: '%s'", agent_reply)
 
-    log.info("Agent response: %s", agent_reply)
     ti.xcom_push(key="agent_response", value=agent_reply)
+    log.info("[VERTEX-AI] ✅ call_vertex_ai_agent task completed.")
 
 
 def update_watermark(**context) -> None:
@@ -172,19 +336,46 @@ def update_watermark(**context) -> None:
     Task 3 – Persist the new high-water-mark so subsequent runs
     only pick up entries newer than the ones just processed.
     """
+    log.info("=" * 70)
+    log.info("[WATERMARK] ▶ Starting update_watermark task")
+    log.info("=" * 70)
+
     ti = context["ti"]
+
+    # Pull values from upstream tasks
     new_hwm = ti.xcom_pull(task_ids="extract_new_entries", key="new_hwm")
     record_count = ti.xcom_pull(task_ids="extract_new_entries", key="record_count")
     agent_response = ti.xcom_pull(task_ids="call_vertex_ai_agent", key="agent_response")
 
+    log.info("[WATERMARK] Data from upstream tasks:")
+    log.info("[WATERMARK]   new_hwm        = %s", new_hwm)
+    log.info("[WATERMARK]   record_count   = %s", record_count)
+    log.info("[WATERMARK]   agent_response = %s", agent_response)
+
+    if new_hwm is None:
+        log.error(
+            "[WATERMARK] ❌ new_hwm is None — cannot update the watermark! "
+            "The extract task may not have completed successfully."
+        )
+        raise ValueError("new_hwm is None — cannot update watermark.")
+
+    old_hwm = _get_last_hwm()
+    log.info("[WATERMARK] Updating HWM: '%s' → '%s'", old_hwm, new_hwm)
     Variable.set(HWM_VARIABLE_KEY, new_hwm)
+    log.info("[WATERMARK] ✅ HWM Variable '%s' updated successfully.", HWM_VARIABLE_KEY)
+
     log.info(
-        "Pipeline complete — processed %s record(s). "
-        "New HWM set to %s. Agent said: %s",
+        "[WATERMARK] ══ Pipeline Summary ══\n"
+        "  Records processed : %s\n"
+        "  Old HWM           : %s\n"
+        "  New HWM           : %s\n"
+        "  Agent response    : %s",
         record_count,
+        old_hwm,
         new_hwm,
         agent_response,
     )
+    log.info("[WATERMARK] ✅ update_watermark task completed.")
 
 
 # ---------------------------------------------------------------------------

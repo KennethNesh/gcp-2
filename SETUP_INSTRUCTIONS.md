@@ -121,14 +121,14 @@ terraform plan \
   -var="region=${GCP_REGION}" \
   -var="snowflake_database=MY_DB" \
   -var="snowflake_schema=MY_SCHEMA" \
-  -var="snowflake_table=ERROR_LOGS"
+  -var="snowflake_table=test"
 
 terraform apply \
   -var="project_id=${GCP_PROJECT_ID}" \
   -var="region=${GCP_REGION}" \
   -var="snowflake_database=MY_DB" \
   -var="snowflake_schema=MY_SCHEMA" \
-  -var="snowflake_table=ERROR_LOGS"
+  -var="snowflake_table=test"
 ```
 
 After Terraform finishes, upload the DAG:
@@ -202,7 +202,7 @@ Go to **Admin → Variables** and create:
 |----------|-------|-------------|
 | `SNOWFLAKE_DATABASE` | `MY_DB` | Your Snowflake database name |
 | `SNOWFLAKE_SCHEMA` | `MY_SCHEMA` | Your Snowflake schema name |
-| `SNOWFLAKE_TABLE` | `ERROR_LOGS` | The table to extract from |
+| `SNOWFLAKE_TABLE` | `test` | The table to extract from |
 | `SNOWFLAKE_TIMESTAMP_COL` | `CREATED_AT` | Column used for incremental extraction |
 | `GCP_PROJECT_ID` | `your-project-id` | Your GCP project |
 | `GCP_REGION` | `us-central1` | Region for Vertex AI |
@@ -222,7 +222,7 @@ gcloud composer environments run ${COMPOSER_ENV} \
 
 gcloud composer environments run ${COMPOSER_ENV} \
     --location="${GCP_REGION}" \
-    variables set -- SNOWFLAKE_TABLE    "ERROR_LOGS"
+    variables set -- SNOWFLAKE_TABLE    "test"
 
 gcloud composer environments run ${COMPOSER_ENV} \
     --location="${GCP_REGION}" \

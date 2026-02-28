@@ -10,13 +10,15 @@ set -euo pipefail
 : "${GCP_REGION:=us-central1}"
 : "${COMPOSER_ENV_NAME:=snowflake-vertex-pipeline}"
 : "${COMPOSER_IMAGE_VERSION:=composer-2.9.7-airflow-2.9.3}"
+: "${COMPOSER_SA:=composer-sa@${GCP_PROJECT_ID}.iam.gserviceaccount.com}"
 
 echo "━━━ Creating Cloud Composer 2 environment ━━━"
 gcloud composer environments create "${COMPOSER_ENV_NAME}" \
     --project="${GCP_PROJECT_ID}" \
     --location="${GCP_REGION}" \
     --image-version="${COMPOSER_IMAGE_VERSION}" \
-    --environment-size=small
+    --environment-size=small \
+    --service-account="${COMPOSER_SA}"
 
 echo ""
 echo "━━━ Installing PyPI packages ━━━"
@@ -40,7 +42,7 @@ gcloud composer environments run "${COMPOSER_ENV_NAME}" \
 gcloud composer environments run "${COMPOSER_ENV_NAME}" \
     --project="${GCP_PROJECT_ID}" \
     --location="${GCP_REGION}" \
-    variables set -- SNOWFLAKE_TABLE "ERROR_LOGS"
+    variables set -- SNOWFLAKE_TABLE "test"
 
 gcloud composer environments run "${COMPOSER_ENV_NAME}" \
     --project="${GCP_PROJECT_ID}" \
