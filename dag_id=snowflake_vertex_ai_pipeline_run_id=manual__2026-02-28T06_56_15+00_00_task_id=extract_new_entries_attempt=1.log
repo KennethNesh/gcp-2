@@ -1,0 +1,105 @@
+default-hostname
+*** Reading remote logs from Cloud Logging.
+[2026-02-28 06:57:41.667022+00:00] {local_task_job_runner.py:120} INFO - ::group::Pre task execution logs
+[2026-02-28 06:57:41.767151+00:00] {taskinstance.py:2077} INFO - Dependencies all met for dep_context=non-requeueable deps ti=<TaskInstance: snowflake_vertex_ai_pipeline.extract_new_entries manual__2026-02-28T06:56:15+00:00 [queued]>
+[2026-02-28 06:57:41.793132+00:00] {taskinstance.py:2077} INFO - Dependencies all met for dep_context=requeueable deps ti=<TaskInstance: snowflake_vertex_ai_pipeline.extract_new_entries manual__2026-02-28T06:56:15+00:00 [queued]>
+[2026-02-28 06:57:41.793197+00:00] {taskinstance.py:2307} INFO - Starting attempt 1 of 3
+[2026-02-28 06:57:41.831150+00:00] {taskinstance.py:2331} INFO - Executing <Task(PythonOperator): extract_new_entries> on 2026-02-28 06:56:15+00:00
+[2026-02-28 06:57:41.877888+00:00] {standard_task_runner.py:64} INFO - Started process 3213 to run task
+[2026-02-28 06:57:41.885005+00:00] {standard_task_runner.py:90} INFO - Running: ['airflow', 'tasks', 'run', 'snowflake_vertex_ai_pipeline', 'extract_new_entries', 'manual__2026-02-28T06:56:15+00:00', '--job-id', '59', '--raw', '--subdir', 'DAGS_FOLDER/snowflake_vertex_pipeline.py', '--cfg-path', '/tmp/tmp2o__0sm3']
+[2026-02-28 06:57:41.885758+00:00] {standard_task_runner.py:91} INFO - Job 59: Subtask extract_new_entries
+[2026-02-28 06:57:42.050363+00:00] {task_command.py:432} INFO - Running <TaskInstance: snowflake_vertex_ai_pipeline.extract_new_entries manual__2026-02-28T06:56:15+00:00 [running]> on host airflow-worker-n6pk2
+[2026-02-28 06:57:42.477251+00:00] {taskinstance.py:2650} INFO - Exporting env vars: AIRFLOW_CTX_DAG_OWNER='data-engineering' AIRFLOW_CTX_DAG_ID='snowflake_vertex_ai_pipeline' AIRFLOW_CTX_TASK_ID='extract_new_entries' AIRFLOW_CTX_EXECUTION_DATE='2026-02-28T06:56:15+00:00' AIRFLOW_CTX_TRY_NUMBER='1' AIRFLOW_CTX_DAG_RUN_ID='manual__2026-02-28T06:56:15+00:00'
+[2026-02-28 06:57:42.479349+00:00] {taskinstance.py:430} INFO - ::endgroup::
+[2026-02-28 06:57:42.526972+00:00] {snowflake_vertex_pipeline.py:135} INFO - ======================================================================
+[2026-02-28 06:57:42.528425+00:00] {snowflake_vertex_pipeline.py:136} INFO - [EXTRACT] ▶ Starting extract_new_entries task
+[2026-02-28 06:57:42.529423+00:00] {snowflake_vertex_pipeline.py:137} INFO - ======================================================================
+[2026-02-28 06:57:42.579362+00:00] {snowflake_vertex_pipeline.py:121} WARNING - [HWM] No high-water-mark variable 'snowflake_pipeline_hwm' found — this appears to be the FIRST RUN. Defaulting to epoch (1970-01-01T00:00:00Z) to fetch all rows.
+[2026-02-28 06:57:42.580665+00:00] {snowflake_vertex_pipeline.py:151} INFO - [EXTRACT] Target table          : test
+[2026-02-28 06:57:42.581197+00:00] {snowflake_vertex_pipeline.py:152} INFO - [EXTRACT] Timestamp column      : "created_at"
+[2026-02-28 06:57:42.581670+00:00] {snowflake_vertex_pipeline.py:153} INFO - [EXTRACT] High-water-mark (HWM) : 1970-01-01T00:00:00Z
+[2026-02-28 06:57:42.582487+00:00] {snowflake_vertex_pipeline.py:154} INFO - [EXTRACT] Database & schema are taken from the Airflow connection 'snowflake_default'. Check Admin → Connections if they are wrong.
+[2026-02-28 06:57:42.582921+00:00] {snowflake_vertex_pipeline.py:159} INFO - [EXTRACT] SQL query:
+SELECT *
+        FROM   test
+        WHERE  "created_at" > %(hwm)s
+        ORDER  BY "created_at" ASC
+[2026-02-28 06:57:42.583644+00:00] {snowflake_vertex_pipeline.py:160} INFO - [EXTRACT] Query parameter       : hwm = '1970-01-01T00:00:00Z'
+[2026-02-28 06:57:42.584458+00:00] {snowflake_vertex_pipeline.py:163} INFO - [EXTRACT] Creating SnowflakeHook with conn_id='snowflake_default'
+[2026-02-28 06:57:42.584529+00:00] {snowflake_vertex_pipeline.py:164} INFO - [EXTRACT] Database & schema will come from the 'snowflake_default' connection (NOT overridden by Variables).
+[2026-02-28 06:57:42.585040+00:00] {snowflake_vertex_pipeline.py:171} INFO - [EXTRACT] Establishing Snowflake connection …
+[2026-02-28 06:57:42.641189+00:00] {base.py:84} INFO - Using connection ID 'snowflake_default' for task execution.
+[2026-02-28 06:57:42.642676+00:00] {connection.py:613} INFO - Snowflake Connector for Python Version: 4.3.0, Python Version: 3.11.8, Platform: Linux-6.12.55+-x86_64-with-glibc2.31
+[2026-02-28 06:57:42.645088+00:00] {connection.py:1709} INFO - Connecting to GLOBAL Snowflake domain
+[2026-02-28 06:57:50.737573+00:00] {snowflake_vertex_pipeline.py:174} INFO - [EXTRACT] ✅ Snowflake connection established successfully.
+[2026-02-28 06:57:50.738208+00:00] {snowflake_vertex_pipeline.py:192} INFO - [EXTRACT] Executing query against Snowflake …
+[2026-02-28 06:57:50.908551+00:00] {snowflake_vertex_pipeline.py:200} ERROR - [EXTRACT] ❌ FAILED to execute Snowflake query!
+[2026-02-28 06:57:50.909316+00:00] {snowflake_vertex_pipeline.py:201} ERROR - [EXTRACT] Query was:
+SELECT *
+        FROM   test
+        WHERE  "created_at" > %(hwm)s
+        ORDER  BY "created_at" ASC
+[2026-02-28 06:57:50.909613+00:00] {snowflake_vertex_pipeline.py:202} ERROR - [EXTRACT] Error type: ProgrammingError
+[2026-02-28 06:57:50.910571+00:00] {snowflake_vertex_pipeline.py:203} ERROR - [EXTRACT] Error details: 000904 (42000): 01c2b5a1-0207-e891-001c-ab7f0019e4a6: SQL compilation error: error line 3 at position 15
+invalid identifier '"created_at"'
+[2026-02-28 06:57:50.913820+00:00] {snowflake_vertex_pipeline.py:204} ERROR - [EXTRACT] Traceback:
+Traceback (most recent call last):
+  File "/home/airflow/gcs/dags/snowflake_vertex_pipeline.py", line 193, in extract_new_entries
+    cursor.execute(query, {"hwm": hwm})
+  File "/opt/python3.11/lib/python3.11/site-packages/snowflake/connector/cursor.py", line 1144, in execute
+    Error.errorhandler_wrapper(self.connection, self, error_class, errvalue)
+  File "/opt/python3.11/lib/python3.11/site-packages/snowflake/connector/errors.py", line 298, in errorhandler_wrapper
+    handed_over = Error.hand_to_other_handler(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/snowflake/connector/errors.py", line 354, in hand_to_other_handler
+    cursor.errorhandler(connection, cursor, error_class, error_value)
+  File "/opt/python3.11/lib/python3.11/site-packages/snowflake/connector/errors.py", line 229, in default_errorhandler
+    raise error_class(
+snowflake.connector.errors.ProgrammingError: 000904 (42000): 01c2b5a1-0207-e891-001c-ab7f0019e4a6: SQL compilation error: error line 3 at position 15
+invalid identifier '"created_at"'
+
+[2026-02-28 06:57:51.073093+00:00] {snowflake_vertex_pipeline.py:212} ERROR - [EXTRACT] 🔎 DIAGNOSTIC — Actual columns in table 'test': ['ID', 'ERROR_MESSAGE', 'ERROR_SEVERITY', 'SOURCE_SYSTEM', 'CREATED_AT']
+[2026-02-28 06:57:51.073150+00:00] {snowflake_vertex_pipeline.py:217} ERROR - [EXTRACT] 💡 The query used column '"created_at"' but it was not found. Set the Airflow Variable SNOWFLAKE_TIMESTAMP_COL to one of the columns listed above.
+[2026-02-28 06:57:51.073834+00:00] {snowflake_vertex_pipeline.py:229} ERROR - [EXTRACT] 💡 TIP: Common causes:
+  - Table 'test' does not exist in the database/schema set in the 'snowflake_default' connection (check Admin → Connections)
+  - Column '"created_at"' does not exist (check SNOWFLAKE_TIMESTAMP_COL variable)
+  - The role/user does not have SELECT permission on this table
+  - Database or schema in the connection is incorrect
+[2026-02-28 06:57:51.074306+00:00] {snowflake_vertex_pipeline.py:242} INFO - [EXTRACT] Closing cursor and connection.
+[2026-02-28 06:57:51.217427+00:00] {taskinstance.py:441} INFO - ::group::Post task execution logs
+[2026-02-28 06:57:51.220417+00:00] {taskinstance.py:2907} ERROR - Task failed with exception
+Traceback (most recent call last):
+  File "/opt/python3.11/lib/python3.11/site-packages/airflow/models/taskinstance.py", line 465, in _execute_task
+    result = _execute_callable(context=context, **execute_callable_kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/airflow/models/taskinstance.py", line 432, in _execute_callable
+    return execute_callable(context=context, **execute_callable_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/airflow/models/baseoperator.py", line 401, in wrapper
+    return func(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/airflow/operators/python.py", line 235, in execute
+    return_value = self.execute_callable()
+                   ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/airflow/operators/python.py", line 252, in execute_callable
+    return self.python_callable(*self.op_args, **self.op_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/airflow/gcs/dags/snowflake_vertex_pipeline.py", line 193, in extract_new_entries
+    cursor.execute(query, {"hwm": hwm})
+  File "/opt/python3.11/lib/python3.11/site-packages/snowflake/connector/cursor.py", line 1144, in execute
+    Error.errorhandler_wrapper(self.connection, self, error_class, errvalue)
+  File "/opt/python3.11/lib/python3.11/site-packages/snowflake/connector/errors.py", line 298, in errorhandler_wrapper
+    handed_over = Error.hand_to_other_handler(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/python3.11/lib/python3.11/site-packages/snowflake/connector/errors.py", line 354, in hand_to_other_handler
+    cursor.errorhandler(connection, cursor, error_class, error_value)
+  File "/opt/python3.11/lib/python3.11/site-packages/snowflake/connector/errors.py", line 229, in default_errorhandler
+    raise error_class(
+snowflake.connector.errors.ProgrammingError: 000904 (42000): 01c2b5a1-0207-e891-001c-ab7f0019e4a6: SQL compilation error: error line 3 at position 15
+invalid identifier '"created_at"'
+[2026-02-28 06:57:51.267356+00:00] {taskinstance.py:1206} INFO - Marking task as UP_FOR_RETRY. dag_id=snowflake_vertex_ai_pipeline, task_id=extract_new_entries, run_id=manual__2026-02-28T06:56:15+00:00, execution_date=20260228T065615, start_date=20260228T065741, end_date=20260228T065751
+[2026-02-28 06:57:51.316418+00:00] {standard_task_runner.py:110} ERROR - Failed to execute job 59 for task extract_new_entries (000904 (42000): 01c2b5a1-0207-e891-001c-ab7f0019e4a6: SQL compilation error: error line 3 at position 15
+invalid identifier '"created_at"'; 3213)
+[2026-02-28 06:57:51.415491+00:00] {local_task_job_runner.py:243} INFO - Task exited with return code 1
+[2026-02-28 06:57:51.491462+00:00] {taskinstance.py:3506} INFO - 0 downstream tasks scheduled from follow-on schedule check
+[2026-02-28 06:57:51.497391+00:00] {local_task_job_runner.py:222} INFO - ::endgroup::

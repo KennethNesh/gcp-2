@@ -72,16 +72,24 @@ def _load_variable(key: str, default: str) -> str:
         return default
 
 
-SNOWFLAKE_DATABASE = _load_variable("SNOWFLAKE_DATABASE", "MY_DB")
-SNOWFLAKE_SCHEMA = _load_variable("SNOWFLAKE_SCHEMA", "MY_SCHEMA")
-SNOWFLAKE_TABLE = _load_variable("SNOWFLAKE_TABLE", "ERROR_LOGS")
+# Database and schema are read from the Airflow *Connection* (snowflake_default)
+# that you configured in Admin → Connections.  We do NOT override them with
+# Variables so the connection remains the single source of truth.
+# If you ever need to override them, set these Variables and uncomment the hook
+# overrides in extract_new_entries().
+# SNOWFLAKE_DATABASE = _load_variable("SNOWFLAKE_DATABASE", "MY_DB")
+# SNOWFLAKE_SCHEMA   = _load_variable("SNOWFLAKE_SCHEMA",   "MY_SCHEMA")
+
+SNOWFLAKE_TABLE = _load_variable("SNOWFLAKE_TABLE", "test")
 TIMESTAMP_COL = _load_variable("SNOWFLAKE_TIMESTAMP_COL", "CREATED_AT")
 GCP_PROJECT_ID = _load_variable("GCP_PROJECT_ID", "my-gcp-project")
 GCP_REGION = _load_variable("GCP_REGION", "us-central1")
 
-# Fully-qualified table reference: DATABASE.SCHEMA.TABLE
-FQ_TABLE = f"{SNOWFLAKE_DATABASE}.{SNOWFLAKE_SCHEMA}.{SNOWFLAKE_TABLE}"
-log.info("[CONFIG] Fully-qualified table target: %s", FQ_TABLE)
+log.info(
+    "[CONFIG] Table target: %s  (database & schema come from the '%s' connection)",
+    SNOWFLAKE_TABLE,
+    SNOWFLAKE_CONN_ID,
+)
 
 # Airflow Variable that persists the high-water-mark between runs.
 HWM_VARIABLE_KEY = "snowflake_pipeline_hwm"
@@ -132,30 +140,33 @@ def extract_new_entries(**context) -> None:
     hwm = _get_last_hwm()
 
     # -- 2. Log the query we're about to run ------------------------------
+    # Use just the table name — the database & schema context is set by
+    # the Airflow Connection (snowflake_default), so no need to fully-qualify.
     query = f"""
         SELECT *
-        FROM   {FQ_TABLE}
+        FROM   {SNOWFLAKE_TABLE}
         WHERE  {TIMESTAMP_COL} > %(hwm)s
         ORDER  BY {TIMESTAMP_COL} ASC
     """
-    log.info("[EXTRACT] Target table         : %s", FQ_TABLE)
+    log.info("[EXTRACT] Target table          : %s", SNOWFLAKE_TABLE)
     log.info("[EXTRACT] Timestamp column      : %s", TIMESTAMP_COL)
     log.info("[EXTRACT] High-water-mark (HWM) : %s", hwm)
+    log.info(
+        "[EXTRACT] Database & schema are taken from the Airflow connection '%s'. "
+        "Check Admin → Connections if they are wrong.",
+        SNOWFLAKE_CONN_ID,
+    )
     log.info("[EXTRACT] SQL query:\n%s", query.strip())
     log.info("[EXTRACT] Query parameter       : hwm = '%s'", hwm)
 
     # -- 3. Connect to Snowflake ------------------------------------------
     log.info("[EXTRACT] Creating SnowflakeHook with conn_id='%s'", SNOWFLAKE_CONN_ID)
     log.info(
-        "[EXTRACT] Hook overrides → database='%s', schema='%s'",
-        SNOWFLAKE_DATABASE,
-        SNOWFLAKE_SCHEMA,
+        "[EXTRACT] Database & schema will come from the '%s' connection "
+        "(NOT overridden by Variables).",
+        SNOWFLAKE_CONN_ID,
     )
-    hook = SnowflakeHook(
-        snowflake_conn_id=SNOWFLAKE_CONN_ID,
-        database=SNOWFLAKE_DATABASE,
-        schema=SNOWFLAKE_SCHEMA,
-    )
+    hook = SnowflakeHook(snowflake_conn_id=SNOWFLAKE_CONN_ID)
 
     log.info("[EXTRACT] Establishing Snowflake connection …")
     try:
@@ -164,7 +175,6 @@ def extract_new_entries(**context) -> None:
     except Exception as exc:
         log.error("[EXTRACT] ❌ FAILED to connect to Snowflake!")
         log.error("[EXTRACT] Connection ID: '%s'", SNOWFLAKE_CONN_ID)
-        log.error("[EXTRACT] Database: '%s', Schema: '%s'", SNOWFLAKE_DATABASE, SNOWFLAKE_SCHEMA)
         log.error("[EXTRACT] Error type: %s", type(exc).__name__)
         log.error("[EXTRACT] Error details: %s", exc)
         log.error("[EXTRACT] Traceback:\n%s", traceback.format_exc())
@@ -179,6 +189,11 @@ def extract_new_entries(**context) -> None:
 
     # -- 4. Execute the query ---------------------------------------------
     try:
+        # Ensure Snowflake session uses UTC so timestamps match Airflow's UTC.
+        log.info("[EXTRACT] Setting Snowflake session timezone to UTC …")
+        cursor.execute("ALTER SESSION SET TIMEZONE = 'UTC'")
+        log.info("[EXTRACT] ✅ Session timezone set to UTC.")
+
         log.info("[EXTRACT] Executing query against Snowflake …")
         cursor.execute(query, {"hwm": hwm})
         columns = [desc[0] for desc in cursor.description]
@@ -192,13 +207,39 @@ def extract_new_entries(**context) -> None:
         log.error("[EXTRACT] Error type: %s", type(exc).__name__)
         log.error("[EXTRACT] Error details: %s", exc)
         log.error("[EXTRACT] Traceback:\n%s", traceback.format_exc())
+
+        # --- Diagnostic: try to list actual columns so the user can see them ---
+        try:
+            diag_cursor = conn.cursor()
+            diag_cursor.execute(f"DESCRIBE TABLE {SNOWFLAKE_TABLE}")
+            table_columns = [row[0] for row in diag_cursor.fetchall()]
+            diag_cursor.close()
+            log.error(
+                "[EXTRACT] 🔎 DIAGNOSTIC — Actual columns in table '%s': %s",
+                SNOWFLAKE_TABLE,
+                table_columns,
+            )
+            log.error(
+                "[EXTRACT] 💡 The query used column '%s' but it was not found. "
+                "Set the Airflow Variable SNOWFLAKE_TIMESTAMP_COL to one of "
+                "the columns listed above.",
+                TIMESTAMP_COL,
+            )
+        except Exception:
+            log.warning(
+                "[EXTRACT] Could not run DESCRIBE TABLE %s for diagnostics.",
+                SNOWFLAKE_TABLE,
+            )
+
         log.error(
             "[EXTRACT] 💡 TIP: Common causes:\n"
-            "  - Table '%s' does not exist (check SNOWFLAKE_TABLE variable)\n"
+            "  - Table '%s' does not exist in the database/schema set in the "
+            "'%s' connection (check Admin → Connections)\n"
             "  - Column '%s' does not exist (check SNOWFLAKE_TIMESTAMP_COL variable)\n"
             "  - The role/user does not have SELECT permission on this table\n"
-            "  - Database or schema name is incorrect",
-            FQ_TABLE,
+            "  - Database or schema in the connection is incorrect",
+            SNOWFLAKE_TABLE,
+            SNOWFLAKE_CONN_ID,
             TIMESTAMP_COL,
         )
         raise
